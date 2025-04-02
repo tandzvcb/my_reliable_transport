@@ -15,7 +15,7 @@ ERROR_TYPES=0123
 
 # Kill previous ports first
 PREV_PIDS=$(sudo lsof -ti:$PORT_RECV,$PORT_SEND)
-if [ -n "$PIDS" ]; then
+if [ -n "$PREV_PIDS" ]; then
   sudo kill -9 $PREV_PIDS
 fi
 
