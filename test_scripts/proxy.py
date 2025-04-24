@@ -52,55 +52,62 @@ def main():
     options = args.error_types
     start_stage = 0
 
-    def run(
-        from_addr, from_port, from_socket, to_addr, to_port, to_socket, start_stage
-    ):
+    def run(from_addr, from_port, from_socket, to_addr, to_port, to_socket, start_stage):
         def delay():
-            """Delay a packet by 0.4 seconds."""
-            pkt, _ = from_socket.recvfrom(2048)
-            pkt_type, seq_num = get_seq_num(pkt)
-            print(f"Got it: Delay. {pkt_type}: {seq_num}")
-            time.sleep(0.4)
-            to_socket.sendto(pkt, (to_addr, to_port))
+            try:
+                pkt, _ = from_socket.recvfrom(2048)
+                pkt_type, seq_num = get_seq_num(pkt)
+                print(f"Got it: Delay. {pkt_type}: {seq_num}")
+                time.sleep(0.4)
+                to_socket.sendto(pkt, (to_addr, to_port))
+            except BlockingIOError:
+                return
 
         def reorder():
-            """Take in 6 packets, reorder them, and send them out."""
             num = 6
             packet_list = []
-
             for _ in range(num):
                 try:
                     pkt, _ = from_socket.recvfrom(2048)
                     pkt_type, seq_num = get_seq_num(pkt)
                     print(f"Got it: Reorder. {pkt_type}: {seq_num}")
                     packet_list.append(pkt)
-                except socket.error:
+                except BlockingIOError:
                     break
-
             random.shuffle(packet_list)
             for pkt in packet_list:
                 to_socket.sendto(pkt, (to_addr, to_port))
 
         def drop():
-            """Drop the next available packet."""
-            pkt, _ = from_socket.recvfrom(2048)
-            pkt_type, seq_num = get_seq_num(pkt)
-            print(f"Got it: Drop. {pkt_type}: {seq_num}")
+            try:
+                pkt, _ = from_socket.recvfrom(2048)
+                pkt_type, seq_num = get_seq_num(pkt)
+                print(f"Got it: Drop. {pkt_type}: {seq_num}")
+            except BlockingIOError:
+                return
 
         def jam():
-            """Randomly change a byte from the packet to "a"."""
-            pkt, _ = from_socket.recvfrom(2048)
-            i = random.randint(0, len(pkt) - 1)
-            pkt = pkt[:i] + b"a" + pkt[i + 1 :]
-            pkt_type, seq_num = get_seq_num(pkt)
-            print(f"Got it: Jam. {pkt_type}: {seq_num}")
-            to_socket.sendto(pkt, (to_addr, to_port))
+            try:
+                pkt, _ = from_socket.recvfrom(2048)
+                i = random.randint(0, len(pkt) - 1)
+                pkt = pkt[:i] + b"a" + pkt[i + 1:]
+                pkt_type, seq_num = get_seq_num(pkt)
+                print(f"Got it: Jam. {pkt_type}: {seq_num}")
+                to_socket.sendto(pkt, (to_addr, to_port))
+            except BlockingIOError:
+                return
+
+        from_socket.setblocking(False)
+        try:
+            pkt, address = from_socket.recvfrom(2048)
+        except BlockingIOError:
+            return
+
+        if address[1] != receiver_port and address[1] != bind_port:
+            sender_port.pop(0)
+            sender_port.append(address[1])
 
         if start_stage < 10 or random.randint(1, 100) > 20:
-            pkt, address = from_socket.recvfrom(2048, socket.MSG_DONTWAIT)
-            if address[1] != receiver_port and address[1] != bind_port:
-                sender_port.pop(0)
-                sender_port.append(address[1])
             pkt_type, seq_num = get_seq_num(pkt)
             print(f"Got it: No messing. {pkt_type}: {seq_num}")
             to_socket.sendto(pkt, (to_addr, to_port))
@@ -124,34 +131,18 @@ def main():
     sender_socket.bind((bind_addr, bind_port))
 
     while True:
-        # The proxy alternatively forwards messages from sender to receiver and from
-        # receiver to sender; each turn transmits at most 5 packets
         try:
             for _ in range(5):
-                run(
-                    sender_addr,
-                    sender_port,
-                    sender_socket,
-                    receiver_addr,
-                    receiver_port,
-                    receiver_socket,
-                    start_stage,
-                )
+                run(sender_addr, sender_port, sender_socket,
+                    receiver_addr, receiver_port, receiver_socket, start_stage)
                 start_stage += 1
         except socket.error:
             pass
 
         try:
             for _ in range(5):
-                run(
-                    receiver_addr,
-                    receiver_port,
-                    receiver_socket,
-                    sender_addr,
-                    sender_port[0],
-                    sender_socket,
-                    start_stage,
-                )
+                run(receiver_addr, receiver_port, receiver_socket,
+                    sender_addr, sender_port[0], sender_socket, start_stage)
                 start_stage += 1
         except socket.error:
             pass
